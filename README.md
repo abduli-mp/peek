@@ -36,6 +36,6 @@ Open the local URL displayed in your terminal.
 
 ## Demo
 
-[Live Demo](ADD_YOUR_DEMO_URL)
+[Live Demo](https://peek-3wl.pages.dev/)
 
 ## Made with ❤️ by Abduli-mp
