@@ -4,10 +4,10 @@ import Footer from "./components/Footer";
 
 function App() {
   return (
-    <div className="max-w-[70%] mx-auto h-[100dvh] flex items-center justify-center flex-col">
-      <FileUploader />
-      <Footer />
-    </div>
+      <div className="max-w-[70%] mx-auto flex items-center justify-between flex-col py-5">
+        <FileUploader />
+        <Footer />
+      </div>
   );
 }
 
