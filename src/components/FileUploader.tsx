@@ -102,10 +102,8 @@ export default function FileUploader() {
   const [openPreview, setPreview] = useState(false);
 
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
-  const [currentPackage, setCurrentPackage] = useState<Record<string, string>>(
-    {},
-  );
-  const [optionalPeers, setOptionalPeers] = useState<string[]>([]);
+  const [, setCurrentPackage] = useState<Record<string, string>>({});
+  const [, setOptionalPeers] = useState<string[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [analyzed, setAnalyzed] = useState(false);
