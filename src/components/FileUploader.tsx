@@ -1130,6 +1130,7 @@ export default function FileUploader() {
         }
 
         resolvedMap = getResolvedDependencies(lockJson);
+        lockedPackages = getLockedPackages(lockJson);
       }
 
       setCurrentPackage(packageMap);
