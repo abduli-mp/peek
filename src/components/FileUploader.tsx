@@ -1,5 +1,7 @@
 import { useState } from "react";
+
 import { BiCollapseAlt, BiExpandAlt } from "react-icons/bi";
+
 import semver from "semver";
 
 type DependencyType =
@@ -21,57 +23,107 @@ type Vulnerability = {
   summary: string;
   severity: string;
   fixed: string;
+  source: string;
+  affectedPackage: string;
+  url?: string;
+  aliases: string[];
+};
+
+type SecurityPackage = {
+  name: string;
+  version: string;
+  rootDependency: string;
+};
+
+type NpmAdvisory = {
+  id?: number | string;
+  url?: string;
+  title?: string;
+  severity?: string;
+  vulnerable_versions?: string;
+  patched_versions?: string;
+  recommendation?: string;
+  cvss?: { score?: number | string };
 };
 
 type Dependency = {
   name: string;
+
   declared: string;
+
   resolved: string;
+
   latest: string;
+
   type: DependencyType;
+
   status: DependencyStatus[];
+
   problems: string[];
+
   recommendations: string[];
+
   command: string;
+
   deprecated: boolean;
+
   vulnerabilities: Vulnerability[];
+  securityScan: "complete" | "partial" | "failed";
 };
 
 type PackageData = {
   name?: string;
+
   version?: string;
+
   dependencies?: Record<string, string>;
+
   devDependencies?: Record<string, string>;
+
   peerDependencies?: Record<string, string>;
+
   optionalDependencies?: Record<string, string>;
+
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
 };
 
 type LockPackage = {
   version?: string;
+
   resolved?: string;
+
   integrity?: string;
+
   dependencies?: Record<string, string>;
+
   optional?: boolean;
+
   dev?: boolean;
+
   peer?: boolean;
 };
 
 type LegacyLockDependency = {
   version?: string;
+
   dependencies?: Record<string, LegacyLockDependency>;
 };
 
 type PackageLockData = {
   name?: string;
+
   version?: string;
+
   lockfileVersion?: number;
+
   packages?: Record<string, LockPackage>;
+
   dependencies?: Record<string, LegacyLockDependency>;
 };
 
 type RegistryVersion = {
   deprecated?: string;
+
   peerDependencies?: Record<string, string>;
 };
 
@@ -79,38 +131,53 @@ type RegistryData = {
   "dist-tags"?: {
     latest?: string;
   };
+
   versions?: Record<string, RegistryVersion>;
 };
 
 const categories: DependencyType[] = [
   "dependencies",
+
   "devDependencies",
+
   "peerDependencies",
+
   "optionalDependencies",
 ];
 
 const registry = "https://registry.npmjs.org";
+
 const osv = "https://api.osv.dev/v1/querybatch";
 
 const MAX_CONCURRENT_REQUESTS = 5;
 
 export default function FileUploader() {
   const [file, setFile] = useState<File | null>(null);
+
   const [isDragging, setIsDragging] = useState(false);
+
   const [lockFile, setLockFile] = useState<File | null>(null);
+
   const [content, setContent] = useState<string | null>(null);
+
   const [openPreview, setPreview] = useState(false);
 
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
+
   const [, setCurrentPackage] = useState<Record<string, string>>({});
+
   const [, setOptionalPeers] = useState<string[]>([]);
 
   const [loading, setLoading] = useState(false);
+
   const [analyzed, setAnalyzed] = useState(false);
+
   const [error, setError] = useState("");
 
   const [search, setSearch] = useState("");
+
   const [filter, setFilter] = useState("all");
+
   const [expanded, setExpanded] = useState<string | null>(null);
 
   function handleSelectedFiles(selectedFiles: File[]) {
@@ -123,31 +190,41 @@ export default function FileUploader() {
     }
 
     setContent(null);
+
     setDependencies([]);
+
     setCurrentPackage({});
+
     setOptionalPeers([]);
+
     setAnalyzed(false);
+
     setError("");
+
     setExpanded(null);
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     handleSelectedFiles(Array.from(e.target.files || []));
+
     e.target.value = "";
   }
 
   function handleDragOver(e: React.DragEvent<HTMLLabelElement>) {
     e.preventDefault();
+
     setIsDragging(true);
   }
 
   function handleDragLeave(e: React.DragEvent<HTMLLabelElement>) {
     e.preventDefault();
+
     setIsDragging(false);
   }
 
   function handleDrop(e: React.DragEvent<HTMLLabelElement>) {
     e.preventDefault();
+
     setIsDragging(false);
 
     handleSelectedFiles(Array.from(e.dataTransfer.files));
@@ -177,6 +254,7 @@ export default function FileUploader() {
     }
 
     setContent(null);
+
     setPreview(false);
   }
 
@@ -186,27 +264,39 @@ export default function FileUploader() {
     }
 
     setFile(null);
+
     setLockFile(null);
+
     setContent(null);
+
     setDependencies([]);
+
     setCurrentPackage({});
+
     setOptionalPeers([]);
+
     setAnalyzed(false);
+
     setError("");
+
     setExpanded(null);
   }
 
   // Validate npm package names.
+
   function validPackageName(name: string) {
     return /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+$/i.test(name);
   }
 
   // Run tasks with limited concurrency.
+
   async function runLimited<T>(
     tasks: (() => Promise<T>)[],
+
     limit: number,
   ): Promise<T[]> {
     const results: T[] = new Array(tasks.length);
+
     let nextIndex = 0;
 
     async function worker() {
@@ -227,28 +317,35 @@ export default function FileUploader() {
   }
 
   // Extract direct dependencies from npm lockfiles.
+
   function getResolvedDependencies(
     lock: PackageLockData,
   ): Record<string, string> {
     const resolved: Record<string, string> = {};
 
     // npm lockfile v2 and v3.
+
     if (lock.packages) {
       for (const [path, info] of Object.entries(lock.packages)) {
         if (!path.startsWith("node_modules/")) continue;
+
         if (!info.version) continue;
 
-        const packageName = path.split("node_modules/").filter(Boolean).at(-1);
-
-        if (!packageName) continue;
-
-        // Ignore nested installations.
+        // Only use the root installation for the direct dependency map.
+        const directPath = path
+          .slice("node_modules/".length)
+          .split("/node_modules/")[0];
         const isNested = path
           .slice("node_modules/".length)
           .includes("/node_modules/");
 
-        if (!isNested) {
-          resolved[packageName] = info.version;
+        if (!isNested && directPath) {
+          const segments = directPath.split("/");
+          const packageName = segments[0].startsWith("@")
+            ? `${segments[0]}/${segments[1] || ""}`
+            : segments[0];
+
+          if (packageName) resolved[packageName] = info.version;
         }
       }
 
@@ -256,6 +353,7 @@ export default function FileUploader() {
     }
 
     // npm lockfile v1.
+
     if (lock.dependencies) {
       for (const [name, info] of Object.entries(lock.dependencies)) {
         if (info.version) {
@@ -267,33 +365,116 @@ export default function FileUploader() {
     return resolved;
   }
 
+  // Include transitive packages from the lockfile for security scanning.
+  function getLockedPackages(lock: PackageLockData): SecurityPackage[] {
+    const packages: SecurityPackage[] = [];
+
+    if (lock.packages) {
+      for (const [path, info] of Object.entries(lock.packages)) {
+        if (!path.startsWith("node_modules/") || !info.version) continue;
+
+        const segments = path.split("/");
+        const nodeModulesIndex = segments.indexOf("node_modules");
+        if (nodeModulesIndex < 0 || !segments[nodeModulesIndex + 1]) continue;
+
+        const firstSegment = segments[nodeModulesIndex + 1];
+        const rootDependency = firstSegment.startsWith("@")
+          ? `${firstSegment}/${segments[nodeModulesIndex + 2] || ""}`
+          : firstSegment;
+
+        const packageName = segments.slice(
+          segments.lastIndexOf("node_modules") + 1,
+        );
+        const name =
+          packageName[0]?.startsWith("@") && packageName[1]
+            ? `${packageName[0]}/${packageName[1]}`
+            : packageName[0];
+
+        if (!name || !rootDependency || rootDependency.endsWith("/")) continue;
+
+        packages.push({
+          name,
+          version: info.version,
+          rootDependency,
+        });
+      }
+
+      return packages;
+    }
+
+    // npm lockfile v1 stores nested dependencies as a tree.
+    function walkLegacy(
+      dependencies: Record<string, LegacyLockDependency>,
+      rootDependency?: string,
+    ) {
+      for (const [name, info] of Object.entries(dependencies)) {
+        const root = rootDependency || name;
+
+        if (info.version) {
+          packages.push({
+            name,
+            version: info.version,
+            rootDependency: root,
+          });
+        }
+
+        if (info.dependencies) {
+          walkLegacy(info.dependencies, root);
+        }
+      }
+    }
+
+    if (lock.dependencies) walkLegacy(lock.dependencies);
+    return packages;
+  }
+
   // Get package information from npm.
+
   async function getPackageInfo(
     name: string,
+
     declared: string,
+
     type: DependencyType,
+
     packageMap: Record<string, string>,
+
     optionalPeerNames: string[],
+
     resolvedMap: Record<string, string>,
+
     hasLockfile: boolean,
   ): Promise<Dependency> {
     const result: Dependency = {
       name,
+
       declared,
+
       resolved: "",
+
       latest: "",
+
       type,
+
       status: [],
+
       problems: [],
+
       recommendations: [],
+
       command: `npm install ${name}`,
+
       deprecated: false,
+
       vulnerabilities: [],
+      securityScan: "failed",
     };
 
     if (!validPackageName(name)) {
       result.status.push("error");
+
       result.problems.push("Invalid npm package name.");
+
       result.recommendations.push("Check the package name in package.json.");
 
       return result;
@@ -303,7 +484,9 @@ export default function FileUploader() {
 
     if (!range) {
       result.status.push("error");
+
       result.problems.push("Invalid version specification.");
+
       result.recommendations.push(
         "Use a valid npm version range, such as ^1.0.0 or ~2.1.0.",
       );
@@ -315,6 +498,7 @@ export default function FileUploader() {
 
     if (!minimum) {
       result.status.push("error");
+
       result.problems.push("Could not resolve the declared version range.");
 
       return result;
@@ -324,9 +508,11 @@ export default function FileUploader() {
 
     if (hasLockfile && !actualVersion) {
       result.status.push("conflict");
+
       result.problems.push(
         "This dependency is declared in package.json but has no top-level entry in package-lock.json.",
       );
+
       result.recommendations.push(
         "Run npm install to synchronize package.json and package-lock.json.",
       );
@@ -338,6 +524,7 @@ export default function FileUploader() {
 
     if (!semver.valid(resolvedVersion)) {
       result.status.push("error");
+
       result.problems.push(
         `Invalid resolved version in package-lock.json: ${resolvedVersion}`,
       );
@@ -349,9 +536,11 @@ export default function FileUploader() {
 
     if (!semver.satisfies(resolvedVersion, range)) {
       result.status.push("conflict");
+
       result.problems.push(
         `Resolved version ${resolvedVersion} does not satisfy the declared range ${declared}.`,
       );
+
       result.recommendations.push(
         "Run npm install to resolve the version mismatch.",
       );
@@ -365,7 +554,9 @@ export default function FileUploader() {
       if (!response.ok) {
         if (response.status === 404) {
           result.status.push("error");
+
           result.problems.push("Package was not found in the npm registry.");
+
           result.recommendations.push(
             "Check whether the package name is correct.",
           );
@@ -377,6 +568,7 @@ export default function FileUploader() {
       }
 
       const metadata = (await response.json()) as RegistryData;
+
       const latest = metadata["dist-tags"]?.latest || "";
 
       result.latest = latest;
@@ -385,6 +577,7 @@ export default function FileUploader() {
 
       if (!installedMetadata) {
         result.status.push("error");
+
         result.problems.push(
           "The resolved version could not be found in npm registry metadata.",
         );
@@ -393,26 +586,35 @@ export default function FileUploader() {
       }
 
       // Check whether a newer version exists.
+
       if (semver.valid(latest) && semver.gt(latest, resolvedVersion)) {
         result.status.push("outdated");
+
         result.problems.push(`A newer version is available: ${latest}.`);
+
         result.recommendations.push(`Consider updating ${name} to ${latest}.`);
+
         result.command = `npm install ${name}@latest`;
       }
 
       // Check whether the installed version is deprecated.
+
       if (installedMetadata.deprecated) {
         result.deprecated = true;
+
         result.status.push("deprecated");
+
         result.problems.push(
           `This version is deprecated: ${installedMetadata.deprecated}`,
         );
+
         result.recommendations.push(
           "Consider replacing this package or updating to a supported version.",
         );
       }
 
       // Check peer dependency requirements.
+
       const peers = installedMetadata.peerDependencies || {};
 
       for (const [peerName, peerRange] of Object.entries(peers)) {
@@ -423,9 +625,11 @@ export default function FileUploader() {
         if (!peerVersion) {
           if (!packageMap[peerName]) {
             result.status.push("conflict");
+
             result.problems.push(
               `Missing peer dependency: ${peerName} (${peerRange}).`,
             );
+
             result.recommendations.push(
               `Install the required peer dependency: npm install ${peerName}.`,
             );
@@ -439,9 +643,11 @@ export default function FileUploader() {
           !semver.satisfies(peerVersion, peerRange)
         ) {
           result.status.push("conflict");
+
           result.problems.push(
             `Peer dependency conflict: ${peerName} requires ${peerRange}, but ${peerVersion} is installed.`,
           );
+
           result.recommendations.push(
             `Check compatibility with ${peerName}@${peerRange}.`,
           );
@@ -453,6 +659,7 @@ export default function FileUploader() {
       result.problems.push(
         "Could not retrieve package information from the npm registry.",
       );
+
       result.recommendations.push(
         "Check your internet connection and try again.",
       );
@@ -464,134 +671,400 @@ export default function FileUploader() {
   }
 
   // Security analysis using OSV.
-  async function analyzeSecurity(items: Dependency[]): Promise<Dependency[]> {
-    const validItems = items.filter(
-      (item) => item.resolved && !item.status.includes("error"),
-    );
 
+  function normalizeSeverity(value: unknown, score?: unknown): string {
+    const normalized = typeof value === "string" ? value.toLowerCase() : "";
+    if (
+      ["critical", "high", "moderate", "medium", "low"].includes(normalized)
+    ) {
+      return normalized === "moderate"
+        ? "Medium"
+        : normalized[0].toUpperCase() + normalized.slice(1);
+    }
+
+    const numericScore = Number(score);
+    if (Number.isFinite(numericScore) && numericScore > 0) {
+      if (numericScore >= 9) return "Critical";
+      if (numericScore >= 7) return "High";
+      if (numericScore >= 4) return "Medium";
+      return "Low";
+    }
+
+    return "Unknown";
+  }
+
+  function getOsvFixedVersion(
+    vulnerability: any,
+    currentVersion: string,
+  ): string {
+    const candidates: string[] = [];
+
+    for (const affected of vulnerability.affected || []) {
+      for (const range of affected.ranges || []) {
+        for (const event of range.events || []) {
+          if (
+            event.fixed &&
+            semver.valid(event.fixed) &&
+            semver.gt(event.fixed, currentVersion)
+          ) {
+            candidates.push(event.fixed);
+          }
+        }
+      }
+    }
+
+    return candidates.sort(semver.compare)[0] || "No fix information available";
+  }
+
+  function getPatchedVersion(
+    patchedRange: string | undefined,
+    currentVersion: string,
+  ): string {
+    if (
+      !patchedRange ||
+      patchedRange.trim() === "*" ||
+      patchedRange === "<0.0.0"
+    ) {
+      return "No fix information available";
+    }
+
+    const candidates = patchedRange
+      .split("||")
+      .map((range) => semver.minVersion(range.trim())?.version)
+      .filter((version): version is string =>
+        Boolean(
+          version &&
+          semver.valid(version) &&
+          semver.gt(version, currentVersion),
+        ),
+      )
+      .sort(semver.compare);
+
+    return candidates[0] || "No fix information available";
+  }
+
+  function addOrMergeVulnerability(item: Dependency, incoming: Vulnerability) {
+    const incomingAliases = new Set([
+      incoming.id.toUpperCase(),
+      ...incoming.aliases.map((alias) => alias.toUpperCase()),
+    ]);
+
+    const existing = item.vulnerabilities.find((vulnerability) => {
+      const existingAliases = [
+        vulnerability.id.toUpperCase(),
+        ...vulnerability.aliases.map((alias) => alias.toUpperCase()),
+      ];
+      return (
+        vulnerability.affectedPackage === incoming.affectedPackage &&
+        existingAliases.some((alias) => incomingAliases.has(alias))
+      );
+    });
+
+    if (existing) {
+      const sources = new Set(existing.source.split(" + "));
+      sources.add(incoming.source);
+      existing.source = [...sources].join(" + ");
+      existing.aliases = [
+        ...new Set([...existing.aliases, ...incoming.aliases]),
+      ];
+      if (
+        existing.fixed === "No fix information available" &&
+        incoming.fixed !== "No fix information available"
+      ) {
+        existing.fixed = incoming.fixed;
+      }
+      if (existing.severity === "Unknown" && incoming.severity !== "Unknown") {
+        existing.severity = incoming.severity;
+      }
+      if (!existing.url && incoming.url) existing.url = incoming.url;
+      return;
+    }
+
+    item.vulnerabilities.push(incoming);
+  }
+
+  async function analyzeSecurity(
+    items: Dependency[],
+    lockedPackages: SecurityPackage[],
+  ): Promise<Dependency[]> {
+    const itemByName = new Map(items.map((item) => [item.name, item] as const));
+    const packages = lockedPackages.length
+      ? lockedPackages
+      : items
+          .filter((item) => item.resolved && !item.status.includes("error"))
+          .map((item) => ({
+            name: item.name,
+            version: item.resolved,
+            rootDependency: item.name,
+          }));
+
+    const uniquePackages = [
+      ...new Map(
+        packages
+          .filter(
+            (pkg) =>
+              semver.valid(pkg.version) && itemByName.has(pkg.rootDependency),
+          )
+          .map((pkg) => [`${pkg.name}@${pkg.version}`, pkg] as const),
+      ).values(),
+    ];
+
+    const sourceResults = { osv: false, npm: false };
+    let osvFailed = false;
     const batchSize = 100;
 
-    for (let start = 0; start < validItems.length; start += batchSize) {
-      const batch = validItems.slice(start, start + batchSize);
-
-      const queries = batch.map((item) => ({
-        package: {
-          name: item.name,
-          ecosystem: "npm",
-        },
-        version: item.resolved,
+    // OSV checks every resolved package, including transitive dependencies.
+    for (let start = 0; start < uniquePackages.length; start += batchSize) {
+      const batch = uniquePackages.slice(start, start + batchSize);
+      const queries = batch.map((pkg) => ({
+        package: { name: pkg.name, ecosystem: "npm" },
+        version: pkg.version,
       }));
 
       try {
         const response = await fetch(osv, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ queries }),
         });
 
-        if (!response.ok) {
-          throw new Error("OSV request failed.");
-        }
+        if (!response.ok) throw new Error(`OSV returned ${response.status}.`);
 
-        const data = await response.json();
+        const data = (await response.json()) as {
+          results?: Array<{ vulns?: any[] }>;
+        };
 
-        data.results?.forEach((result: { vulns?: any[] }, index: number) => {
-          const item = batch[index];
+        sourceResults.osv = true;
 
-          if (!item || !result.vulns?.length) return;
+        data.results?.forEach((result, index) => {
+          const pkg = batch[index];
+          const owner = pkg ? itemByName.get(pkg.rootDependency) : undefined;
+          if (!pkg || !owner || !result.vulns?.length) return;
 
           for (const vulnerability of result.vulns) {
-            const cve = vulnerability.aliases?.find((alias: string) =>
-              alias.startsWith("CVE-"),
+            const aliases: string[] = Array.isArray(vulnerability.aliases)
+              ? vulnerability.aliases
+              : [];
+            const id =
+              aliases.find((alias) => alias.startsWith("GHSA-")) ||
+              aliases.find((alias) => alias.startsWith("CVE-")) ||
+              vulnerability.id;
+
+            const cvss = vulnerability.severity?.[0]?.score;
+            const fixed = getOsvFixedVersion(vulnerability, pkg.version);
+            const severity = normalizeSeverity(
+              vulnerability.database_specific?.severity,
+              cvss,
             );
 
-            const severity =
-              vulnerability.database_specific?.severity ||
-              vulnerability.severity?.[0]?.score ||
-              "Unknown";
-
-            const fixed =
-              vulnerability.affected?.flatMap(
-                (affected: any) =>
-                  affected.ranges?.flatMap(
-                    (range: any) =>
-                      range.events
-                        ?.filter((event: any) => event.fixed)
-                        .map((event: any) => event.fixed) || [],
-                  ) || [],
-              )?.[0] || "No fix information available";
-
-            item.vulnerabilities.push({
-              id: cve || vulnerability.id,
+            addOrMergeVulnerability(owner, {
+              id,
               summary:
                 vulnerability.summary ||
                 vulnerability.details ||
                 "No description available.",
               severity,
               fixed,
+              source: "OSV",
+              affectedPackage: pkg.name,
+              url: `https://osv.dev/vulnerability/${vulnerability.id}`,
+              aliases,
             });
           }
-
-          if (item.vulnerabilities.length) {
-            item.status.push("vulnerable");
-
-            item.problems.push(
-              `${item.vulnerabilities.length} known security vulnerability(s) detected.`,
-            );
-
-            item.recommendations.push(
-              "Update to a patched version if one is available.",
-            );
-
-            const fixedVersions = item.vulnerabilities
-              .map((v) => v.fixed)
-              .filter(
-                (version) =>
-                  version !== "No fix information available" &&
-                  semver.valid(version),
-              );
-
-            if (fixedVersions.length) {
-              const highestFixed = fixedVersions.sort(semver.compare).at(-1);
-
-              item.recommendations.push(
-                `A patched version is available: ${highestFixed}. Verify compatibility before updating.`,
-              );
-
-              item.command = `npm install ${item.name}@${highestFixed}`;
-            }
-          }
-
-          item.status = [...new Set(item.status)];
         });
-      } catch {
-        console.error("OSV security analysis failed.");
-
-        batch.forEach((item) => {
-          item.problems.push(
-            "Security analysis could not be completed. This package's security status is unknown.",
-          );
-        });
+      } catch (error) {
+        osvFailed = true;
+        console.error("OSV security analysis failed:", error);
       }
+    }
+
+    sourceResults.osv = uniquePackages.length > 0 && !osvFailed;
+
+    // npm's bulk advisory endpoint complements OSV and uses the lockfile versions.
+    const npmPayload: Record<string, string[]> = {};
+    for (const pkg of uniquePackages) {
+      npmPayload[pkg.name] ||= [];
+      if (!npmPayload[pkg.name].includes(pkg.version)) {
+        npmPayload[pkg.name].push(pkg.version);
+      }
+    }
+
+    if (Object.keys(npmPayload).length) {
+      try {
+        const apiBaseUrl = (import.meta.env.VITE_API_URL || "").replace(
+          /\/$/,
+          "",
+        );
+        const response = await fetch(`${apiBaseUrl}/api/npm-audit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(npmPayload),
+        });
+
+        if (!response.ok) {
+          throw new Error(`npm advisory endpoint returned ${response.status}.`);
+        }
+
+        const advisories = (await response.json()) as Record<
+          string,
+          NpmAdvisory[]
+        >;
+        sourceResults.npm = true;
+
+        for (const pkg of uniquePackages) {
+          const owner = itemByName.get(pkg.rootDependency);
+          if (!owner) continue;
+
+          for (const advisory of advisories[pkg.name] || []) {
+            const vulnerableRange = advisory.vulnerable_versions || "*";
+            if (
+              semver.valid(pkg.version) &&
+              semver.validRange(vulnerableRange) &&
+              !semver.satisfies(pkg.version, vulnerableRange)
+            ) {
+              continue;
+            }
+
+            const id = String(
+              advisory.id || advisory.url || advisory.title || pkg.name,
+            );
+            const fixed = getPatchedVersion(
+              advisory.patched_versions,
+              pkg.version,
+            );
+            const ghsa = advisory.url?.match(/GHSA-[A-Za-z0-9-]+/i)?.[0];
+            const aliases = [
+              ...(advisory.url ? [advisory.url] : []),
+              ...(ghsa ? [ghsa.toUpperCase()] : []),
+            ];
+
+            addOrMergeVulnerability(owner, {
+              id,
+              summary:
+                advisory.title ||
+                advisory.recommendation ||
+                "An npm security advisory affects this package.",
+              severity: normalizeSeverity(
+                advisory.severity,
+                advisory.cvss?.score,
+              ),
+              fixed,
+              source: "npm audit",
+              affectedPackage: pkg.name,
+              url: advisory.url,
+              aliases,
+            });
+          }
+        }
+      } catch (error) {
+        console.error("npm audit advisory scan failed:", error);
+      }
+    }
+
+    for (const item of items) {
+      item.securityScan =
+        sourceResults.osv && sourceResults.npm
+          ? "complete"
+          : sourceResults.osv || sourceResults.npm
+            ? "partial"
+            : "failed";
+
+      if (item.securityScan === "failed") {
+        item.problems.push(
+          "Security analysis could not be completed. This package's security status is unknown.",
+        );
+        item.recommendations.push(
+          "Retry the scan. Both OSV and npm advisory sources were unavailable.",
+        );
+        continue;
+      }
+
+      if (item.securityScan === "partial") {
+        const unavailable = [
+          !sourceResults.osv ? "OSV" : "",
+          !sourceResults.npm ? "npm audit" : "",
+        ].filter(Boolean);
+        item.problems.push(
+          `${unavailable.join(" and ")} could not be reached. Results may be incomplete.`,
+        );
+      }
+
+      if (!item.vulnerabilities.length) continue;
+
+      item.status.push("vulnerable");
+      item.problems.push(
+        `${item.vulnerabilities.length} unique known security issue(s) detected, including transitive dependencies.`,
+      );
+
+      item.recommendations.push(
+        "Preview changes with npm audit fix --dry-run, then run npm audit fix for compatible updates. Review the package-lock.json diff and avoid --force unless you have checked the breaking changes.",
+      );
+
+      const directFixes = item.vulnerabilities
+        .filter((vulnerability) => vulnerability.affectedPackage === item.name)
+        .map((vulnerability) => vulnerability.fixed)
+        .filter(
+          (version) =>
+            version !== "No fix information available" && semver.valid(version),
+        );
+
+      if (directFixes.length) {
+        const highestFixed = directFixes.sort(semver.compare).at(-1);
+        item.recommendations.push(
+          `A patched release is listed: ${highestFixed}. Check compatibility before updating.`,
+        );
+        item.command = `npm install ${item.name}@${highestFixed}`;
+      } else if (
+        item.vulnerabilities.some(
+          (vulnerability) =>
+            vulnerability.fixed !== "No fix information available",
+        )
+      ) {
+        item.recommendations.push(
+          "The issue is in a transitive dependency. Try npm audit fix first. If it remains, update the parent package that introduces it and review the resulting dependency tree.",
+        );
+        item.command = "npm audit fix";
+      } else {
+        item.recommendations.push(
+          "No patched version is currently listed by the advisory sources. Check the advisory links and update when a fix becomes available.",
+        );
+        item.command = "npm audit";
+      }
+
+      item.status = [...new Set(item.status)];
+      item.vulnerabilities.sort((a, b) => {
+        const rank: Record<string, number> = {
+          Critical: 4,
+          High: 3,
+          Medium: 2,
+          Low: 1,
+          Unknown: 0,
+        };
+        return (rank[b.severity] || 0) - (rank[a.severity] || 0);
+      });
     }
 
     return items;
   }
 
   // Main dependency analysis.
+
   async function handleAnalyze() {
     if (!file) return;
 
     setLoading(true);
+
     setError("");
+
     setAnalyzed(false);
+
     setDependencies([]);
+
     setExpanded(null);
 
     try {
       const text = await file.text();
+
       const packageJson = JSON.parse(text) as PackageData;
 
       if (
@@ -629,13 +1102,17 @@ export default function FileUploader() {
       const optionalPeerNames = Object.entries(
         packageJson.peerDependenciesMeta || {},
       )
+
         .filter(([, meta]) => meta?.optional === true)
+
         .map(([name]) => name);
 
       let resolvedMap: Record<string, string> = {};
+      let lockedPackages: SecurityPackage[] = [];
 
       if (lockFile) {
         const lockText = await lockFile.text();
+
         const lockJson = JSON.parse(lockText) as PackageLockData;
 
         if (
@@ -656,6 +1133,7 @@ export default function FileUploader() {
       }
 
       setCurrentPackage(packageMap);
+
       setOptionalPeers(optionalPeerNames);
 
       const tasks: (() => Promise<Dependency>)[] = [];
@@ -667,11 +1145,17 @@ export default function FileUploader() {
           tasks.push(() =>
             getPackageInfo(
               name,
+
               version,
+
               category,
+
               packageMap,
+
               optionalPeerNames,
+
               resolvedMap,
+
               Boolean(lockFile),
             ),
           );
@@ -680,9 +1164,10 @@ export default function FileUploader() {
 
       const results = await runLimited(tasks, MAX_CONCURRENT_REQUESTS);
 
-      const secured = await analyzeSecurity(results);
+      const secured = await analyzeSecurity(results, lockedPackages);
 
       setDependencies(secured);
+
       setAnalyzed(true);
     } catch (err) {
       setError(
@@ -694,40 +1179,56 @@ export default function FileUploader() {
   }
 
   // Dashboard statistics.
+
   const stats = [
     {
       label: "Total scanned",
+
       value: dependencies.length,
     },
+
     {
       label: "Errors",
+
       value: dependencies.filter((d) => d.status.includes("error")).length,
     },
+
     {
       label: "Outdated",
+
       value: dependencies.filter((d) => d.status.includes("outdated")).length,
     },
+
     {
       label: "Vulnerabilities",
+
       value: dependencies.reduce(
         (total, d) => total + d.vulnerabilities.length,
+
         0,
       ),
     },
+
     {
       label: "Deprecated",
+
       value: dependencies.filter((d) => d.status.includes("deprecated")).length,
     },
+
     {
       label: "Conflicts",
+
       value: dependencies.filter((d) => d.status.includes("conflict")).length,
     },
   ];
 
   // Search and filtering.
+
   const filtered = dependencies.filter((dependency) => {
     const matchesSearch = dependency.name
+
       .toLowerCase()
+
       .includes(search.toLowerCase());
 
     const matchesFilter =
@@ -741,9 +1242,13 @@ export default function FileUploader() {
 
   function getStatus(dependency: Dependency) {
     if (dependency.status.includes("error")) return "Error";
+
     if (dependency.status.includes("vulnerable")) return "Vulnerable";
+
     if (dependency.status.includes("deprecated")) return "Deprecated";
+
     if (dependency.status.includes("conflict")) return "Conflict";
+
     if (dependency.status.includes("outdated")) return "Outdated";
 
     return "Healthy";
@@ -759,14 +1264,19 @@ export default function FileUploader() {
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={`
+
     flex cursor-pointer flex-col items-center justify-center
+
     border-2 border-dashed p-10 transition-colors
+
     w-[20%]
+
     ${
       isDragging
         ? "border-violet-500 bg-violet-50"
         : "border-gray-300 hover:border-violet-500 hover:bg-violet-50"
     }
+
   `}
         >
           <span className="text-sm font-medium">
@@ -791,6 +1301,7 @@ export default function FileUploader() {
         <div className="space-y-2">
           <p>
             <span className="font-bold">Filename: </span>
+
             {file.name}
           </p>
 
@@ -801,11 +1312,13 @@ export default function FileUploader() {
 
           <p>
             <span className="font-bold">Type: </span>
+
             {file.type || "Unknown"}
           </p>
 
           <p>
             <span className="font-bold">Lockfile: </span>
+
             {lockFile ? lockFile.name : "Not provided"}
           </p>
 
@@ -872,13 +1385,19 @@ export default function FileUploader() {
               <option value="all" className="focus:bg-violet-700">
                 All dependencies
               </option>
+
               <option value="error" className="focus:bg-violet-700">
                 Errors
               </option>
+
               <option value="outdated">Outdated</option>
+
               <option value="vulnerable">Vulnerable</option>
+
               <option value="deprecated">Deprecated</option>
+
               <option value="conflict">Conflicts</option>
+
               <option value="healthy">Healthy</option>
             </select>
           </div>
@@ -890,10 +1409,15 @@ export default function FileUploader() {
               <thead className="bg-gray-100">
                 <tr>
                   <th className="p-4">Package</th>
+
                   <th className="p-4">Declared</th>
+
                   <th className="p-4">Latest</th>
+
                   <th className="p-4">Category</th>
+
                   <th className="p-4">Status</th>
+
                   <th className="p-4">Details</th>
                 </tr>
               </thead>
@@ -961,7 +1485,9 @@ export default function FileUploader() {
           {/* DEPENDENCY DETAILS */}
 
           {dependencies
+
             .filter((d) => d.name === expanded)
+
             .map((dependency) => (
               <div
                 key={dependency.name}
@@ -969,18 +1495,28 @@ export default function FileUploader() {
               >
                 <div
                   className="
+
       relative
+
       w-full md:w-[70%] lg:w-[50%] xl:w-[35%]
+
       max-h-[90vh]
+
       overflow-y-auto
+
       border border-gray-200
+
       bg-[#f5f5f5]
+
       p-6
+
       space-y-5
+
       shadow-xl
+
     "
                 >
-                  <div className="w-full flex items-center justify-between sticky top-0 py-2">
+                  <div className="w-full flex items-center justify-between sticky bg-[#f5f5f5] top-0 py-4">
                     <h3 className="text-3xl font-semibold capitalize text-violet-700">
                       {dependency.name}
                     </h3>
@@ -1016,13 +1552,15 @@ export default function FileUploader() {
 
                     <p>
                       <strong>Security:</strong>{" "}
-                      {dependency.problems.some((p) =>
-                        p.includes("Security analysis could not"),
-                      )
+                      {dependency.securityScan === "failed"
                         ? "Unknown"
                         : dependency.vulnerabilities.length
-                          ? "Vulnerabilities detected"
-                          : "No known vulnerabilities found"}
+                          ? dependency.securityScan === "partial"
+                            ? "Vulnerabilities detected (partial scan)"
+                            : "Vulnerabilities detected"
+                          : dependency.securityScan === "partial"
+                            ? "Partially scanned"
+                            : "No known vulnerabilities found"}
                     </p>
                   </div>
 
@@ -1070,6 +1608,28 @@ export default function FileUploader() {
                           <p className="text-sm">
                             <strong>Fixed in:</strong> {vulnerability.fixed}
                           </p>
+
+                          <p className="text-sm">
+                            <strong>Affected package:</strong>{" "}
+                            {vulnerability.affectedPackage}
+                          </p>
+
+                          <p className="text-sm">
+                            <strong>Source:</strong> {vulnerability.source}
+                          </p>
+
+                          {vulnerability.url && (
+                            <p className="text-sm">
+                              <a
+                                href={vulnerability.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-violet-700 underline"
+                              >
+                                View advisory
+                              </a>
+                            </p>
+                          )}
                         </div>
                       ))}
                     </div>
